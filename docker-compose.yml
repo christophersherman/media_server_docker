@@ -36,6 +36,7 @@ services:
     # We define the "Authelia" ForwardAuth middleware on Traefik itself,
     # so each service can reference "authelia@docker".
     labels:
+      - "traefik.enable=true"  # <-- Add this
       # We create a middleware named "authelia" that points to the Authelia service
       - "traefik.http.middlewares.authelia.forwardauth.address=http://authelia:9091/api/verify?rd=https://auth.twosix.su"
       - "traefik.http.middlewares.authelia.forwardauth.trustForwardHeader=true"
