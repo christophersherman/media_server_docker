@@ -262,7 +262,33 @@ services:
       - "traefik.http.routers.prowlarr-insecure.middlewares=prowlarr-redirect"
       - "traefik.http.middlewares.prowlarr-redirect.redirectscheme.scheme=https"
       - "traefik.docker.network=my_media"
+  #################################################################
+  # JellySeer
+  #################################################################
+  jellyseerr:
+    image: fallenbagel/jellyseerr:latest
+    container_name: jellyseerr
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=America/Los_Angeles
+    volumes:
+      - /srv/config/jellyseerr:/app/config
+    networks:
+      - my_media
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.jellyseerr.rule=Host(`jellyseerr.twosix.su`)"
+      - "traefik.http.routers.jellyseerr.entrypoints=websecure"
+      - "traefik.http.routers.jellyseerr.tls.certresolver=myresolver"
+      - "traefik.http.routers.jellyseerr.middlewares=authelia@docker"
 
+      - "traefik.http.routers.jellyseerr-insecure.rule=Host(`jellyseerr.twosix.su`)"
+      - "traefik.http.routers.jellyseerr-insecure.entrypoints=web"
+      - "traefik.http.routers.jellyseerr-insecure.middlewares=jellyseerr-redirect"
+      - "traefik.http.middlewares.jellyseerr-redirect.redirectscheme.scheme=https"
+      - "traefik.docker.network=my_media"
   #################################################################
   # SABnzbd
   #################################################################
