@@ -1,6 +1,48 @@
 version: "3.8"
 
 services:
+  #################################################################
+  # Traefik Reverse Proxy
+  #################################################################
+  traefik:
+    image: traefik:latest
+    container_name: traefik
+    restart: unless-stopped
+    networks:
+      - my_media
+    # Expose HTTP (80) and HTTPS (443) to the host
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      # Docker socket read-only, so Traefik can auto-discover containers
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # File to store ACME (Let's Encrypt) certificates
+      - /srv/config/traefik/acme.json:/acme.json
+    command:
+      # Enable Docker provider
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+
+      # Entrypoints for HTTP (web) and HTTPS (websecure)
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+
+      # Let's Encrypt / ACME configuration (HTTP challenge)
+      - "--certificatesresolvers.myresolver.acme.email=you@example.com"
+      - "--certificatesresolvers.myresolver.acme.storage=/acme.json"
+      - "--certificatesresolvers.myresolver.acme.httpchallenge.entrypoint=web"
+
+      # Optional Traefik dashboard (secured via additional config).
+      # If you set it up, you'd do something like:
+      # - "--api.dashboard=true"
+      # Then you'd add a Traefik router rule/labels for it.
+    environment:
+      - TZ=America/Los_Angeles
+
+  #################################################################
+  # Jellyfin
+  #################################################################
   jellyfin:
     image: lscr.io/linuxserver/jellyfin:latest
     container_name: jellyfin
@@ -9,15 +51,28 @@ services:
       - PGID=1000
       - TZ=America/Los_Angeles
     volumes:
-      - /srv/config/jellyfin:/config      # Jellyfin config & metadata
-      - /srv/media:/media                 # Root media directory (includes movies/shows/music subdirs)
-    ports:
-      - "8096:8096"  # HTTP
-      # - "8920:8920" (HTTPS if needed)
-    restart: unless-stopped
+      - /srv/config/jellyfin:/config
+      - /srv/media:/media
     networks:
       - my_media
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      # Main HTTPS router
+      - "traefik.http.routers.jellyfin.rule=Host(`jellyfin.example.com`)"
+      - "traefik.http.routers.jellyfin.entrypoints=websecure"
+      - "traefik.http.routers.jellyfin.tls.certresolver=myresolver"
+      # HTTP router for redirect
+      - "traefik.http.routers.jellyfin-insecure.rule=Host(`jellyfin.example.com`)"
+      - "traefik.http.routers.jellyfin-insecure.entrypoints=web"
+      - "traefik.http.routers.jellyfin-insecure.middlewares=jellyfin-redirect"
+      - "traefik.http.middlewares.jellyfin-redirect.redirectscheme.scheme=https"
+      # Required for containers in a custom network
+      - "traefik.docker.network=my_media"
 
+  #################################################################
+  # Sonarr
+  #################################################################
   sonarr:
     image: lscr.io/linuxserver/sonarr:latest
     container_name: sonarr
@@ -27,14 +82,25 @@ services:
       - TZ=America/Los_Angeles
     volumes:
       - /srv/config/sonarr:/config
-      - /srv/media/shows:/tv              # TV library
-      - /srv/downloads:/downloads         # Download directory
-    ports:
-      - "8989:8989"
-    restart: unless-stopped
+      - /srv/media/shows:/tv
+      - /srv/downloads:/downloads
     networks:
       - my_media
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.sonarr.rule=Host(`sonarr.example.com`)"
+      - "traefik.http.routers.sonarr.entrypoints=websecure"
+      - "traefik.http.routers.sonarr.tls.certresolver=myresolver"
+      - "traefik.http.routers.sonarr-insecure.rule=Host(`sonarr.example.com`)"
+      - "traefik.http.routers.sonarr-insecure.entrypoints=web"
+      - "traefik.http.routers.sonarr-insecure.middlewares=sonarr-redirect"
+      - "traefik.http.middlewares.sonarr-redirect.redirectscheme.scheme=https"
+      - "traefik.docker.network=my_media"
 
+  #################################################################
+  # Radarr
+  #################################################################
   radarr:
     image: lscr.io/linuxserver/radarr:latest
     container_name: radarr
@@ -44,14 +110,25 @@ services:
       - TZ=America/Los_Angeles
     volumes:
       - /srv/config/radarr:/config
-      - /srv/media/movies:/movies         # Movies library
+      - /srv/media/movies:/movies
       - /srv/downloads:/downloads
-    ports:
-      - "7878:7878"
-    restart: unless-stopped
     networks:
       - my_media
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.radarr.rule=Host(`radarr.example.com`)"
+      - "traefik.http.routers.radarr.entrypoints=websecure"
+      - "traefik.http.routers.radarr.tls.certresolver=myresolver"
+      - "traefik.http.routers.radarr-insecure.rule=Host(`radarr.example.com`)"
+      - "traefik.http.routers.radarr-insecure.entrypoints=web"
+      - "traefik.http.routers.radarr-insecure.middlewares=radarr-redirect"
+      - "traefik.http.middlewares.radarr-redirect.redirectscheme.scheme=https"
+      - "traefik.docker.network=my_media"
 
+  #################################################################
+  # Lidarr
+  #################################################################
   lidarr:
     image: lscr.io/linuxserver/lidarr:latest
     container_name: lidarr
@@ -61,14 +138,25 @@ services:
       - TZ=America/Los_Angeles
     volumes:
       - /srv/config/lidarr:/config
-      - /srv/media/music:/music           # Music library
+      - /srv/media/music:/music
       - /srv/downloads:/downloads
-    ports:
-      - "8686:8686"
-    restart: unless-stopped
     networks:
       - my_media
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.lidarr.rule=Host(`lidarr.example.com`)"
+      - "traefik.http.routers.lidarr.entrypoints=websecure"
+      - "traefik.http.routers.lidarr.tls.certresolver=myresolver"
+      - "traefik.http.routers.lidarr-insecure.rule=Host(`lidarr.example.com`)"
+      - "traefik.http.routers.lidarr-insecure.entrypoints=web"
+      - "traefik.http.routers.lidarr-insecure.middlewares=lidarr-redirect"
+      - "traefik.http.middlewares.lidarr-redirect.redirectscheme.scheme=https"
+      - "traefik.docker.network=my_media"
 
+  #################################################################
+  # Bazarr
+  #################################################################
   bazarr:
     image: lscr.io/linuxserver/bazarr:latest
     container_name: bazarr
@@ -80,12 +168,23 @@ services:
       - /srv/config/bazarr:/config
       - /srv/media/shows:/tv
       - /srv/media/movies:/movies
-    ports:
-      - "6767:6767"
-    restart: unless-stopped
     networks:
       - my_media
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.bazarr.rule=Host(`bazarr.example.com`)"
+      - "traefik.http.routers.bazarr.entrypoints=websecure"
+      - "traefik.http.routers.bazarr.tls.certresolver=myresolver"
+      - "traefik.http.routers.bazarr-insecure.rule=Host(`bazarr.example.com`)"
+      - "traefik.http.routers.bazarr-insecure.entrypoints=web"
+      - "traefik.http.routers.bazarr-insecure.middlewares=bazarr-redirect"
+      - "traefik.http.middlewares.bazarr-redirect.redirectscheme.scheme=https"
+      - "traefik.docker.network=my_media"
 
+  #################################################################
+  # Prowlarr
+  #################################################################
   prowlarr:
     image: lscr.io/linuxserver/prowlarr:latest
     container_name: prowlarr
@@ -95,12 +194,23 @@ services:
       - TZ=America/Los_Angeles
     volumes:
       - /srv/config/prowlarr:/config
-    ports:
-      - "9696:9696"
-    restart: unless-stopped
     networks:
       - my_media
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.prowlarr.rule=Host(`prowlarr.example.com`)"
+      - "traefik.http.routers.prowlarr.entrypoints=websecure"
+      - "traefik.http.routers.prowlarr.tls.certresolver=myresolver"
+      - "traefik.http.routers.prowlarr-insecure.rule=Host(`prowlarr.example.com`)"
+      - "traefik.http.routers.prowlarr-insecure.entrypoints=web"
+      - "traefik.http.routers.prowlarr-insecure.middlewares=prowlarr-redirect"
+      - "traefik.http.middlewares.prowlarr-redirect.redirectscheme.scheme=https"
+      - "traefik.docker.network=my_media"
 
+  #################################################################
+  # SABnzbd (Usenet Downloader)
+  #################################################################
   sabnzbd:
     image: lscr.io/linuxserver/sabnzbd:latest
     container_name: sabnzbd
@@ -111,12 +221,19 @@ services:
     volumes:
       - /srv/config/sabnzbd:/config
       - /srv/downloads:/downloads
-    ports:
-      - "8080:8080"   # HTTP
-      # - "9090:9090" # HTTPS if needed
-    restart: unless-stopped
     networks:
       - my_media
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.sabnzbd.rule=Host(`sabnzbd.example.com`)"
+      - "traefik.http.routers.sabnzbd.entrypoints=websecure"
+      - "traefik.http.routers.sabnzbd.tls.certresolver=myresolver"
+      - "traefik.http.routers.sabnzbd-insecure.rule=Host(`sabnzbd.example.com`)"
+      - "traefik.http.routers.sabnzbd-insecure.entrypoints=web"
+      - "traefik.http.routers.sabnzbd-insecure.middlewares=sabnzbd-redirect"
+      - "traefik.http.middlewares.sabnzbd-redirect.redirectscheme.scheme=https"
+      - "traefik.docker.network=my_media"
 
 networks:
   my_media:
