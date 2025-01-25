@@ -10,38 +10,76 @@ services:
     restart: unless-stopped
     networks:
       - my_media
-    # Expose HTTP (80) and HTTPS (443) to the host
     ports:
       - "80:80"
       - "443:443"
     volumes:
-      # Docker socket read-only, so Traefik can auto-discover containers
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      # File to store ACME (Let's Encrypt) certificates
       - /srv/config/traefik/acme.json:/acme.json
     command:
-      # Enable Docker provider
+      # Docker provider
       - "--providers.docker=true"
       - "--providers.docker.exposedbydefault=false"
 
-      # Entrypoints for HTTP (web) and HTTPS (websecure)
+      # Entrypoints
       - "--entrypoints.web.address=:80"
       - "--entrypoints.websecure.address=:443"
 
-      # Let's Encrypt / ACME configuration (HTTP challenge)
+      # Let's Encrypt / ACME (HTTP challenge)
       - "--certificatesresolvers.myresolver.acme.email=csherman@mailbox.org"
       - "--certificatesresolvers.myresolver.acme.storage=/acme.json"
       - "--certificatesresolvers.myresolver.acme.httpchallenge.entrypoint=web"
 
-      # Optional Traefik dashboard (secured via additional config).
-      # If you set it up, you'd do something like:
-      # - "--api.dashboard=true"
-      # Then you'd add a Traefik router rule/labels for it.
+    environment:
+      - TZ=America/Los_Angeles
+
+    # We define the "Authelia" ForwardAuth middleware on Traefik itself,
+    # so each service can reference "authelia@docker".
+    labels:
+      # We create a middleware named "authelia" that points to the Authelia service
+      - "traefik.http.middlewares.authelia.forwardauth.address=http://authelia:9091/api/verify?rd=https://auth.twosix.su"
+      - "traefik.http.middlewares.authelia.forwardauth.trustForwardHeader=true"
+
+      # (optional) Another middleware to redirect HTTP->HTTPS for the auth domain
+      - "traefik.http.middlewares.authelia-redirect.redirectscheme.scheme=https"
+
+      #################################
+      # Traefik router for Authelia itself will live on the Authelia container
+      # but you *could* define it here if you prefer. We'll do it on authelia below.
+      #################################
+
+  #################################################################
+  # Authelia (SSO Portal)
+  #################################################################
+  authelia:
+    image: authelia/authelia:latest
+    container_name: authelia
+    restart: unless-stopped
+    networks:
+      - my_media
+    volumes:
+      - /srv/config/authelia:/config
+    # Authelia listens on port 9091 internally
+    # We'll define the router/labels so "auth.twosix.su" can reach it
+
+    labels:
+      - "traefik.enable=true"
+
+      # Secure router for https://auth.twosix.su
+      - "traefik.http.routers.authelia.rule=Host(`auth.twosix.su`)"
+      - "traefik.http.routers.authelia.entrypoints=websecure"
+      - "traefik.http.routers.authelia.tls.certresolver=myresolver"
+
+      # Insecure router for http -> https redirect
+      - "traefik.http.routers.authelia-insecure.rule=Host(`auth.twosix.su`)"
+      - "traefik.http.routers.authelia-insecure.entrypoints=web"
+      - "traefik.http.routers.authelia-insecure.middlewares=authelia-redirect"
+
     environment:
       - TZ=America/Los_Angeles
 
   #################################################################
-  # Jellyfin
+  # Jellyfin at twosix.su
   #################################################################
   jellyfin:
     image: lscr.io/linuxserver/jellyfin:latest
@@ -58,20 +96,24 @@ services:
     restart: unless-stopped
     labels:
       - "traefik.enable=true"
-      # Main HTTPS router
+
+      # HTTPS router
       - "traefik.http.routers.jellyfin.rule=Host(`twosix.su`)"
       - "traefik.http.routers.jellyfin.entrypoints=websecure"
       - "traefik.http.routers.jellyfin.tls.certresolver=myresolver"
-      # HTTP router for redirect
+      # Use Authelia forward auth
+      - "traefik.http.routers.jellyfin.middlewares=authelia@docker"
+
+      # HTTP -> HTTPS
       - "traefik.http.routers.jellyfin-insecure.rule=Host(`twosix.su`)"
       - "traefik.http.routers.jellyfin-insecure.entrypoints=web"
       - "traefik.http.routers.jellyfin-insecure.middlewares=jellyfin-redirect"
       - "traefik.http.middlewares.jellyfin-redirect.redirectscheme.scheme=https"
-      # Required for containers in a custom network
+
       - "traefik.docker.network=my_media"
 
   #################################################################
-  # Sonarr
+  # Sonarr at sonarr.twosix.su
   #################################################################
   sonarr:
     image: lscr.io/linuxserver/sonarr:latest
@@ -89,9 +131,13 @@ services:
     restart: unless-stopped
     labels:
       - "traefik.enable=true"
+
       - "traefik.http.routers.sonarr.rule=Host(`sonarr.twosix.su`)"
       - "traefik.http.routers.sonarr.entrypoints=websecure"
       - "traefik.http.routers.sonarr.tls.certresolver=myresolver"
+      # Authelia SSO
+      - "traefik.http.routers.sonarr.middlewares=authelia@docker"
+
       - "traefik.http.routers.sonarr-insecure.rule=Host(`sonarr.twosix.su`)"
       - "traefik.http.routers.sonarr-insecure.entrypoints=web"
       - "traefik.http.routers.sonarr-insecure.middlewares=sonarr-redirect"
@@ -99,7 +145,7 @@ services:
       - "traefik.docker.network=my_media"
 
   #################################################################
-  # Radarr
+  # Radarr at radarr.twosix.su
   #################################################################
   radarr:
     image: lscr.io/linuxserver/radarr:latest
@@ -120,6 +166,8 @@ services:
       - "traefik.http.routers.radarr.rule=Host(`radarr.twosix.su`)"
       - "traefik.http.routers.radarr.entrypoints=websecure"
       - "traefik.http.routers.radarr.tls.certresolver=myresolver"
+      - "traefik.http.routers.radarr.middlewares=authelia@docker"
+
       - "traefik.http.routers.radarr-insecure.rule=Host(`radarr.twosix.su`)"
       - "traefik.http.routers.radarr-insecure.entrypoints=web"
       - "traefik.http.routers.radarr-insecure.middlewares=radarr-redirect"
@@ -148,6 +196,8 @@ services:
       - "traefik.http.routers.lidarr.rule=Host(`lidarr.twosix.su`)"
       - "traefik.http.routers.lidarr.entrypoints=websecure"
       - "traefik.http.routers.lidarr.tls.certresolver=myresolver"
+      - "traefik.http.routers.lidarr.middlewares=authelia@docker"
+
       - "traefik.http.routers.lidarr-insecure.rule=Host(`lidarr.twosix.su`)"
       - "traefik.http.routers.lidarr-insecure.entrypoints=web"
       - "traefik.http.routers.lidarr-insecure.middlewares=lidarr-redirect"
@@ -176,6 +226,8 @@ services:
       - "traefik.http.routers.bazarr.rule=Host(`bazarr.twosix.su`)"
       - "traefik.http.routers.bazarr.entrypoints=websecure"
       - "traefik.http.routers.bazarr.tls.certresolver=myresolver"
+      - "traefik.http.routers.bazarr.middlewares=authelia@docker"
+
       - "traefik.http.routers.bazarr-insecure.rule=Host(`bazarr.twosix.su`)"
       - "traefik.http.routers.bazarr-insecure.entrypoints=web"
       - "traefik.http.routers.bazarr-insecure.middlewares=bazarr-redirect"
@@ -202,6 +254,8 @@ services:
       - "traefik.http.routers.prowlarr.rule=Host(`prowlarr.twosix.su`)"
       - "traefik.http.routers.prowlarr.entrypoints=websecure"
       - "traefik.http.routers.prowlarr.tls.certresolver=myresolver"
+      - "traefik.http.routers.prowlarr.middlewares=authelia@docker"
+
       - "traefik.http.routers.prowlarr-insecure.rule=Host(`prowlarr.twosix.su`)"
       - "traefik.http.routers.prowlarr-insecure.entrypoints=web"
       - "traefik.http.routers.prowlarr-insecure.middlewares=prowlarr-redirect"
@@ -209,7 +263,7 @@ services:
       - "traefik.docker.network=my_media"
 
   #################################################################
-  # SABnzbd (Usenet Downloader)
+  # SABnzbd
   #################################################################
   sabnzbd:
     image: lscr.io/linuxserver/sabnzbd:latest
@@ -229,6 +283,8 @@ services:
       - "traefik.http.routers.sabnzbd.rule=Host(`sabnzbd.twosix.su`)"
       - "traefik.http.routers.sabnzbd.entrypoints=websecure"
       - "traefik.http.routers.sabnzbd.tls.certresolver=myresolver"
+      - "traefik.http.routers.sabnzbd.middlewares=authelia@docker"
+
       - "traefik.http.routers.sabnzbd-insecure.rule=Host(`sabnzbd.twosix.su`)"
       - "traefik.http.routers.sabnzbd-insecure.entrypoints=web"
       - "traefik.http.routers.sabnzbd-insecure.middlewares=sabnzbd-redirect"
