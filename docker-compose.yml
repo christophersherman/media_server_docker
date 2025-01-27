@@ -90,7 +90,7 @@ services:
       - PGID=1000
       - TZ=America/Los_Angeles
     devices:
-      - /dev/dri:/dev/dri \
+      - /dev/dri:/dev/dri
     volumes:
       - /srv/config/jellyfin:/config
       - /srv/media:/media
