@@ -281,16 +281,14 @@ services:
     restart: unless-stopped
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.jellyseerr.rule=Host(`jellyseerr.twosix.su`)"
+      - "traefik.http.routers.jellyseerr.rule=Host(`get.twosix.su`)"
       - "traefik.http.routers.jellyseerr.entrypoints=websecure"
       - "traefik.http.routers.jellyseerr.tls.certresolver=myresolver"
-      - "traefik.http.routers.jellyseerr.middlewares=authelia@docker"
 
-      - "traefik.http.routers.jellyseerr-insecure.rule=Host(`jellyseerr.twosix.su`)"
+      - "traefik.http.routers.jellyseerr-insecure.rule=Host(`get.twosix.su`)"
       - "traefik.http.routers.jellyseerr-insecure.entrypoints=web"
-      - "traefik.http.routers.jellyseerr-insecure.middlewares=jellyseerr-redirect"
-      - "traefik.http.middlewares.jellyseerr-redirect.redirectscheme.scheme=https"
       - "traefik.docker.network=my_media"
+
   #################################################################
   # SABnzbd
   #################################################################
